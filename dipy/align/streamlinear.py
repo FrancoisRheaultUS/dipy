@@ -12,7 +12,7 @@ from dipy.tracking.streamline import (transform_streamlines,
                                       set_number_of_points,
                                       select_random_set_of_streamlines,
                                       length)
-from dipy.segment.clustering import QuickBundles, qbx_with_merge
+from dipy.segment.clustering import QuickBundles
 from dipy.core.geometry import (compose_transformations,
                                 compose_matrix,
                                 decompose_matrix)
@@ -105,6 +105,7 @@ class BundleMinDistanceMetric(StreamlineDistanceMetric):
 
 class BundleCentroidsMinDistanceMetric(StreamlineDistanceMetric):
     """ Bundle-based Minimum Distance aka BMD
+        Using centroids and their size as weight
 
     This is the cost function used by the StreamlineLinearRegistration
 
@@ -125,9 +126,9 @@ class BundleCentroidsMinDistanceMetric(StreamlineDistanceMetric):
 
         Parameters
         ----------
-        static : streamlines
+        static : tuple - (centroids, cluster sizes)
             Fixed or reference set of streamlines.
-        moving : streamlines
+        moving : tuple - (centroids, cluster sizes)
             Moving streamlines.
 
         Notes
@@ -347,9 +348,9 @@ class StreamlineLinearRegistration(object):
         Parameters
         ----------
 
-        static : streamlines
+        static : streamlines OR tuple - (centroids, weight)
             Reference or fixed set of streamlines.
-        moving : streamlines
+        moving : streamlines OR tuple - (centroids, weight)
             Moving set of streamlines.
         mat : array
             Transformation (4, 4) matrix to start the registration. ``mat``
@@ -362,6 +363,8 @@ class StreamlineLinearRegistration(object):
         map : StreamlineRegistrationMap
 
         """
+        #If we are using centroids and their weight, static/moving are tuple
+        #The function only need the centroids
         if type(static) is tuple and type(moving) is tuple:
             static_centroids = static[0]
             static_cluster_sizes = static[1]
@@ -709,14 +712,23 @@ def bundle_min_distance_centroids_fast(t, static, moving,
         scaling + shearing.
 
     static : array
-        N*M x 3 array. All the points of the static streamlines. With order of
-        streamlines intact. Where N is the number of streamlines and M
-        is the number of points per streamline.
+        N*M x 3 array. All the points of the static centroids. With order of
+        centroids intact. Where N is the number of centroids and M
+        is the number of points per centroids.
 
     moving : array
-        K*M x 3 array. All the points of the moving streamlines. With order of
-        streamlines intact. Where K is the number of streamlines and M
-        is the number of points per streamline.
+        K*M x 3 array. All the points of the moving centroids. With order of
+        centroids intact. Where K is the number of centroids and M
+        is the number of points per centroids.
+
+
+    static_clusters_size : array
+        An array of size K. Int representing the size of the cluster associated
+        with their respective centroid (static)
+
+    moving_clusters_size : array
+        An array of size K. Int representing the size of the cluster associated
+        with their respective centroid (moving)
 
     block_size : int
         Number of points per streamline. All streamlines in static and moving
