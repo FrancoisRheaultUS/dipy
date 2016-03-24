@@ -3,6 +3,7 @@ import numpy as np
 from dipy.utils.six import with_metaclass
 from dipy.core.optimize import Optimizer
 from dipy.align.bundlemin import (_bundle_minimum_distance,
+                                  _bundle_centroids_minimum_distance,
                                   _bundle_minimum_distance_static,
                                   distance_matrix_mdf)
 from dipy.tracking.streamline import (transform_streamlines,
@@ -11,7 +12,7 @@ from dipy.tracking.streamline import (transform_streamlines,
                                       set_number_of_points,
                                       select_random_set_of_streamlines,
                                       length)
-from dipy.segment.clustering import QuickBundles
+from dipy.segment.clustering import QuickBundles, qbx_with_merge
 from dipy.core.geometry import (compose_transformations,
                                 compose_matrix,
                                 decompose_matrix)
@@ -100,6 +101,69 @@ class BundleMinDistanceMetric(StreamlineDistanceMetric):
         return bundle_min_distance_fast(xopt,
                                         self.static_centered_pts,
                                         self.moving_centered_pts,
+                                        self.block_size)
+
+class BundleCentroidsMinDistanceMetric(StreamlineDistanceMetric):
+    """ Bundle-based Minimum Distance aka BMD
+
+    This is the cost function used by the StreamlineLinearRegistration
+
+    Methods
+    -------
+    setup(static, moving)
+    distance(xopt)
+
+    References
+    ----------
+    .. [Garyfallidis14] Garyfallidis et al., "Direct native-space fiber
+                        bundle alignment for group comparisons", ISMRM,
+                        2014.
+    """
+
+    def setup(self, static, moving):
+        """ Setup static and moving sets of streamlines
+
+        Parameters
+        ----------
+        static : streamlines
+            Fixed or reference set of streamlines.
+        moving : streamlines
+            Moving streamlines.
+
+        Notes
+        -----
+        Call this after the object is initiated and before distance.
+        """
+
+        self._set_static_centroids(static)
+        self._set_moving_centroids(moving)
+
+    def _set_static_centroids(self, static):
+        static_centered_pts, st_idx = unlist_streamlines(static[0])
+        self.static_centered_pts = np.ascontiguousarray(static_centered_pts,
+                                                        dtype=np.float64)
+        self.block_size = st_idx[0]
+        self.static_clusters_size = static[1]
+
+    def _set_moving_centroids(self, moving):
+        self.moving_centered_pts, _ = unlist_streamlines(moving[0])
+        self.moving_clusters_size = moving[1]
+
+
+    def distance(self, xopt):
+        """ Distance calculated from this Metric
+
+        Parameters
+        ----------
+        xopt : sequence
+            List of affine parameters as an 1D vector,
+
+        """
+        return bundle_min_distance_centroids_fast(xopt,
+                                        self.static_centered_pts,
+                                        self.moving_centered_pts,
+                                        self.static_clusters_size,
+                                        self.moving_clusters_size,
                                         self.block_size)
 
 class BundleMinDistanceStaticMetric(BundleMinDistanceMetric):
@@ -298,34 +362,46 @@ class StreamlineLinearRegistration(object):
         map : StreamlineRegistrationMap
 
         """
+        if type(static) is tuple and type(moving) is tuple:
+            static_centroids = static[0]
+            static_cluster_sizes = static[1]
+            moving_centroids = moving[0]
+            moving_cluster_sizes = moving[1]
+        else:
+            static_centroids = static
+            moving_centroids = moving
 
         msg = 'need to have the same number of points. Use '
         msg += 'set_number_of_points from dipy.tracking.streamline'
 
-        if not np.all(np.array(list(map(len, static))) == static[0].shape[0]):
+        if not np.all(np.array(list(map(len, static_centroids))) == static_centroids[0].shape[0]):
             raise ValueError('Static streamlines ' + msg)
 
-        if not np.all(np.array(list(map(len, moving))) == moving[0].shape[0]):
+        if not np.all(np.array(list(map(len, moving_centroids))) == moving_centroids[0].shape[0]):
             raise ValueError('Moving streamlines ' + msg)
 
-        if not np.all(np.array(list(map(len, moving))) == static[0].shape[0]):
+        if not np.all(np.array(list(map(len, moving_centroids))) == static_centroids[0].shape[0]):
             raise ValueError('Static and moving streamlines ' + msg)
 
         if mat is None:
-            static_centered, static_shift = center_streamlines(static)
-            moving_centered, moving_shift = center_streamlines(moving)
+            static_centered, static_shift = center_streamlines(static_centroids)
+            moving_centered, moving_shift = center_streamlines(moving_centroids)
+
             static_mat = compose_matrix44([static_shift[0], static_shift[1],
                                            static_shift[2], 0, 0, 0])
 
             moving_mat = compose_matrix44([-moving_shift[0], -moving_shift[1],
                                            -moving_shift[2], 0, 0, 0])
         else:
-            static_centered = static
-            moving_centered = transform_streamlines(moving, mat)
+            static_centered = static_centroids
+            moving_centered = transform_streamlines(moving_centroids, mat)
             static_mat = np.eye(4)
             moving_mat = mat
 
-        self.metric.setup(static_centered, moving_centered)
+        if type(static) is tuple and type(moving) is tuple:
+            self.metric.setup((static_centered, static_cluster_sizes), (moving_centered, moving_cluster_sizes))
+        else:
+            self.metric.setup(static_centered, moving_centered)
 
         distance = self.metric.distance
 
@@ -338,7 +414,7 @@ class StreamlineLinearRegistration(object):
                             method=self.method, options=self.options,
                             evolution=self.evolution)
 
-        if self.method == 'L-BFGS-B':
+        if self.method == 'L-BFGS-B' or self.method == 'centroids':
 
             if self.options is None:
                 self.options = {'maxcor': 10, 'ftol': 1e-7,
@@ -612,6 +688,68 @@ def bundle_min_distance_fast(t, static, moving, block_size):
                                     cols,
                                     block_size)
 
+
+def bundle_min_distance_centroids_fast(t, static, moving,
+                                       static_clusters_size, moving_clusters_size,
+                                       block_size):
+    """ MDF-based pairwise distance optimization function (MIN)
+
+    We minimize the distance between moving streamlines as they align
+    with the static streamlines.
+
+    Parameters
+    -----------
+    t : array
+        1D array. t is a vector of of affine transformation parameters with
+        size at least 6.
+        If size is 6, t is interpreted as translation + rotation.
+        If size is 7, t is interpreted as translation + rotation +
+        isotropic scaling.
+        If size is 12, t is interpreted as translation + rotation +
+        scaling + shearing.
+
+    static : array
+        N*M x 3 array. All the points of the static streamlines. With order of
+        streamlines intact. Where N is the number of streamlines and M
+        is the number of points per streamline.
+
+    moving : array
+        K*M x 3 array. All the points of the moving streamlines. With order of
+        streamlines intact. Where K is the number of streamlines and M
+        is the number of points per streamline.
+
+    block_size : int
+        Number of points per streamline. All streamlines in static and moving
+        should have the same number of points M.
+
+    Returns
+    -------
+    cost: float
+
+    Notes
+    -----
+    This is a faster implementation of ``bundle_min_distance``, which requires
+    that all the points of each streamline are allocated into an ndarray
+    (of shape N*M by 3, with N the number of points per streamline and M the
+    number of streamlines). This can be done by calling
+    `dipy.tracking.streamlines.unlist_streamlines`.
+
+    """
+
+    aff = compose_matrix44(t)
+    moving = np.dot(aff[:3, :3], moving.T).T + aff[:3, 3]
+    moving = np.ascontiguousarray(moving, dtype=np.float64)
+
+    rows = static.shape[0] / block_size
+    cols = moving.shape[0] / block_size
+
+    static_clusters_size = np.asarray(static_clusters_size, dtype=np.int32)
+    moving_clusters_size = np.asarray(moving_clusters_size, dtype=np.int32)
+    return _bundle_centroids_minimum_distance(static, moving,
+                                    static_clusters_size,
+                                    moving_clusters_size,
+                                    rows, cols,
+                                    block_size)
 
 def bundle_min_distance_static_fast(t, static, moving, block_size):
     """ MDF-based pairwise distance optimization function (MIN)
