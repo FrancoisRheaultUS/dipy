@@ -215,21 +215,25 @@ def _bundle_centroids_minimum_distance(double [:, ::1] stat,
                              cnp.npy_intp rows):
     """ MDF-based pairwise distance optimization function
 
-    We minimize the distance between moving streamlines of the same number of
-    points as they align with the static streamlines.
+    We minimize the distance between moving centroids of the same number of
+    points as they align with the static centroids.
 
     Parameters
     -----------
-    static : array
-        Static streamlines
-    moving : array
-        Moving streamlines
+    stat : array
+        Static centroids
+    mov : array
+        Moving centroids
+    stat_clus_size : array
+        Size of clusters
+    mov_clus_size : array
+        Size of clusters
     static_size : int
-        Number of static streamlines
+        Number of static centroids
     moving_size : int
-        Number of moving streamlines
+        Number of moving centroids
     rows : int
-        Number of points per streamline
+        Number of points per centroids
 
     Returns
     -------

@@ -251,6 +251,7 @@ class RecoBundles(object):
         sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
 
         close_clusters_indices = []
+        #Only keep the cluster first 600 clusters that are big enough
         for j in range(len(sorted_tuple)):
             if j < 600 and sorted_tuple[-(j+1)][1] > 10:
                 close_clusters_indices.append(sorted_tuple[-(j+1)][0])
@@ -320,30 +321,12 @@ class RecoBundles(object):
             bounds = [(-30, 30), (-30, 30), (-30, 30),
                       (-45, 45), (-45, 45), (-45, 45), (0.8, 1.2)]
 
-        #if not use_centroids:
-        #    static = select_random_set_of_streamlines(self.model_bundle,
-        #                                              select_model)
-        #    moving = select_random_set_of_streamlines(self.neighb_streamlines,
-        #                                              select_target)
-#
-        #    static = set_number_of_points(static, nb_pts)
-        #    moving = set_number_of_points(moving, nb_pts)
-#
-        #else:
-        #    static = self.model_centroids
-#
-        #    thresholds = [40, 30, 20, 10, 5]
-        #    cluster_map = qbx_with_merge(moving_all, thresholds, nb_pts=nb_pts,
-        #                                 select_randomly=500000, verbose=self.verbose)
-#
-        #    moving = cluster_map.centroids
-
         if progressive == False:
 
             slr = StreamlineLinearRegistration(metric=metric, x0=x0,
                                                bounds=bounds,
                                                method=method)
-            #slm = slr.optimize(self.model_cluster_map, self.neighb_centroids)
+
             slm = slr.optimize(static, moving)
 
         if progressive == True:
@@ -413,13 +396,13 @@ class RecoBundles(object):
                 raise ValueError('Incorrect SLR transform')
         self.transf_streamlines = self.neighb_streamlines.copy()
         self.transf_streamlines._data = apply_affine(slm.matrix, self.transf_streamlines._data)
-        #self.transf_streamlines = transform_streamlines(
-        #    self.neighb_streamlines, slm.matrix)
 
         self.transf_matrix = slm.matrix
         self.slr_bmd = slm.fopt
         self.slr_iterations = slm.iterations
 
+        #If we are using centroids and their weight, static/moving are tuple
+        #The function only need the centroids
         if type(static) is tuple and type(moving) is tuple:
             self.slr_initial_matrix = distance_matrix_mdf(
                 static[0], moving[0])
