@@ -10,7 +10,8 @@ from dipy.tracking.distances import (bundles_distances_mdf,
 from dipy.align.streamlinear import (StreamlineLinearRegistration,
                                      BundleMinDistanceMetric,
                                      BundleSumDistanceMatrixMetric,
-                                     BundleMinDistanceStaticMetric)
+                                     BundleMinDistanceStaticMetric,
+                                     BundleCentroidsMinDistanceMetric)
 from dipy.align.bundlemin import distance_matrix_mdf
 from time import time
 from itertools import chain
@@ -134,7 +135,7 @@ class RecoBundles(object):
         thresholds = [40, 25, 20, clust_thr]
 
         merged_cluster_map = qbx_with_merge(self.streamlines, thresholds,
-                                            nb_pts, None, self.verbose)
+                                            nb_pts, 500000, self.verbose)
 
         self.cluster_map = merged_cluster_map
         self.centroids = merged_cluster_map.centroids
@@ -207,7 +208,7 @@ class RecoBundles(object):
         thresholds = [40, 25, 20, model_clust_thr]
 
         self.model_cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts,
-                                                select_randomly=500000, verbose=self.verbose)
+                                                select_randomly=50000, verbose=self.verbose)
         self.model_centroids = self.model_cluster_map.centroids
         self.nb_model_centroids = len(self.model_centroids)
 
@@ -242,12 +243,21 @@ class RecoBundles(object):
         close_clusters_indices = list(np.where(mins != np.inf)[0])
 
         # set_trace()
-
+        close_clusters_indices_tuple = []
         # TODO overflow with the next line
         close_clusters = self.cluster_map[close_clusters_indices]
+        for i in close_clusters_indices:
+            close_clusters_indices_tuple.append((i, self.cluster_map.clusters_sizes()[i]))
+        sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
+
+        close_clusters_indices = []
+        for j in range(len(sorted_tuple)):
+            if j < 600 and sorted_tuple[-(j+1)][1] > 10:
+                close_clusters_indices.append(sorted_tuple[-(j+1)][0])
 
         close_centroids = [self.centroids[i]
                            for i in close_clusters_indices]
+
         close_indices = [cluster.indices for cluster in close_clusters]
 
         close_streamlines = ArraySequence(chain(*close_clusters))
@@ -255,6 +265,8 @@ class RecoBundles(object):
 
         self.neighb_streamlines = close_streamlines
         self.neighb_clusters = close_clusters
+
+        self.neighb_clusters_size = np.array([len(c) for c in self.neighb_clusters], dtype=np.int16)
         self.neighb_centroids = close_centroids
         self.neighb_indices = close_indices
 
@@ -289,6 +301,17 @@ class RecoBundles(object):
             metric = BundleMinDistanceStaticMetric()
         if metric == 'diagonal':
             metric = BundleSumDistanceMatrixMetric()
+        if metric == 'centroids':
+            metric = BundleCentroidsMinDistanceMetric()
+            moving = (self.neighb_centroids, np.asarray(self.neighb_clusters_size, dtype=np.int32))
+            static = (self.model_centroids, np.asarray(self.model_cluster_map.clusters_sizes(), dtype=np.int32))
+        else:
+            static = select_random_set_of_streamlines(self.model_bundle,
+                                                      select_model)
+            moving = select_random_set_of_streamlines(self.neighb_streamlines,
+                                                      select_target)
+            static = set_number_of_points(static, nb_pts)
+            moving = set_number_of_points(moving, nb_pts)
 
         if x0 is None:
             x0 = 'similarity'
@@ -297,29 +320,30 @@ class RecoBundles(object):
             bounds = [(-30, 30), (-30, 30), (-30, 30),
                       (-45, 45), (-45, 45), (-45, 45), (0.8, 1.2)]
 
-        if not use_centroids:
-            static = select_random_set_of_streamlines(self.model_bundle,
-                                                      select_model)
-            moving = select_random_set_of_streamlines(self.neighb_streamlines,
-                                                      select_target)
-
-            static = set_number_of_points(static, nb_pts)
-            moving = set_number_of_points(moving, nb_pts)
-
-        else:
-            static = self.model_centroids
-
-            thresholds = [40, 30, 20, 10, 5]
-            cluster_map = qbx_with_merge(moving_all, thresholds, nb_pts=nb_pts,
-                                         select_randomly=500000, verbose=self.verbose)
-
-            moving = cluster_map.centroids
+        #if not use_centroids:
+        #    static = select_random_set_of_streamlines(self.model_bundle,
+        #                                              select_model)
+        #    moving = select_random_set_of_streamlines(self.neighb_streamlines,
+        #                                              select_target)
+#
+        #    static = set_number_of_points(static, nb_pts)
+        #    moving = set_number_of_points(moving, nb_pts)
+#
+        #else:
+        #    static = self.model_centroids
+#
+        #    thresholds = [40, 30, 20, 10, 5]
+        #    cluster_map = qbx_with_merge(moving_all, thresholds, nb_pts=nb_pts,
+        #                                 select_randomly=500000, verbose=self.verbose)
+#
+        #    moving = cluster_map.centroids
 
         if progressive == False:
 
             slr = StreamlineLinearRegistration(metric=metric, x0=x0,
                                                bounds=bounds,
                                                method=method)
+            #slm = slr.optimize(self.model_cluster_map, self.neighb_centroids)
             slm = slr.optimize(static, moving)
 
         if progressive == True:
@@ -396,12 +420,21 @@ class RecoBundles(object):
         self.slr_bmd = slm.fopt
         self.slr_iterations = slm.iterations
 
-        self.slr_initial_matrix = distance_matrix_mdf(
-            static, moving)
+        if type(static) is tuple and type(moving) is tuple:
+            self.slr_initial_matrix = distance_matrix_mdf(
+                static[0], moving[0])
 
-        self.slr_final_matrix = distance_matrix_mdf(
-            static, transform_streamlines(moving, slm.matrix))
-        self.slr_xopt = slm.xopt
+            self.slr_final_matrix = distance_matrix_mdf(
+                static[0], transform_streamlines(moving[0], slm.matrix))
+            self.slr_xopt = slm.xopt
+        else:
+            self.slr_initial_matrix = distance_matrix_mdf(
+                static, moving)
+
+            self.slr_final_matrix = distance_matrix_mdf(
+                static, transform_streamlines(moving, slm.matrix))
+            self.slr_xopt = slm.xopt
+
 
         if self.verbose:
             print(' Square-root of BMD is %.3f' % (np.sqrt(self.slr_bmd),))

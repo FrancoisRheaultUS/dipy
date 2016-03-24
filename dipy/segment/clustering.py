@@ -6,6 +6,7 @@ from abc import ABCMeta, abstractmethod
 from dipy.segment.metric import Metric
 from dipy.segment.metric import ResampleFeature
 from dipy.segment.metric import AveragePointwiseEuclideanMetric
+from dipy.tracking.streamline import set_number_of_points
 
 
 class Identity:
@@ -580,7 +581,6 @@ class QuickBundles(Clustering):
         cluster_map.refdata = streamlines
         return cluster_map
 
-
 class QuickBundlesOnline(Clustering):
     r""" Clusters streamlines using QuickBundles [Garyfallidis12]_.
 
@@ -692,7 +692,6 @@ class QuickBundlesOnline(Clustering):
         self._dirty = True
         return cluster_id
 
-
 class QuickBundlesX(Clustering):
     r""" Clusters streamlines using QuickBundlesX.
 
@@ -751,6 +750,7 @@ class QuickBundlesX(Clustering):
         #cluster_map.refdata = streamlines
         return qbx
 
+<<<<<<< HEAD
 
 class QuickBundlesXOnline(Clustering):
     r""" Clusters streamlines using QuickBundlesX.
@@ -835,3 +835,39 @@ class QuickBundlesXOnline(Clustering):
         self._qbx_state, path = self._cluster_fct(streamline, self._idx)
         self._dirty = True
         return path
+=======
+def qbx_with_merge(streamlines, thresholds,  nb_pts=20):
+
+    sample_streamlines = set_number_of_points(streamlines, nb_pts)
+
+    qbx = QuickBundlesX(thresholds,
+                        metric=AveragePointwiseEuclideanMetric())
+
+    qbx_clusters = qbx.cluster(sample_streamlines)
+
+    qbx_merge = QuickBundlesX([thresholds[-1]],
+                              metric=AveragePointwiseEuclideanMetric())
+
+    final_level = len(thresholds)
+
+    qbx_ordering_final = np.random.choice(
+        len(qbx_clusters.get_clusters(final_level)),
+        len(qbx_clusters.get_clusters(final_level)), replace=False)
+
+    qbx_merged_cluster_map = qbx_merge.cluster(
+        qbx_clusters.get_clusters(final_level).centroids,
+        ordering=qbx_ordering_final).get_clusters(1)
+
+    qbx_cluster_map = qbx_clusters.get_clusters(final_level)
+
+    merged_cluster_map = ClusterMapCentroid()
+    for cluster in qbx_merged_cluster_map:
+        merged_cluster = ClusterCentroid(centroid=cluster.centroid)
+        for i in cluster.indices:
+            merged_cluster.indices.extend(qbx_cluster_map[i].indices)
+        merged_cluster_map.add_cluster(merged_cluster)
+
+    merged_cluster_map.refdata = streamlines
+
+    return merged_cluster_map
+>>>>>>> First experimentation with centroids weigthed by their size, new distance metric
