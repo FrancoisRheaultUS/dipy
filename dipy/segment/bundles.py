@@ -167,10 +167,15 @@ class RecoBundles(object):
             print('## Recognize given bundle ## \n')
 
         self.model_bundle = model_bundle
-        self.cluster_model_bundle(model_clust_thr=model_clust_thr)
+        self.cluster_model_bundle(model_clust_thr=model_clust_thr, metric=slr_metric)
+
         success = self.reduce_search_space(
             reduction_thr=reduction_thr,
-            reduction_distance=reduction_distance)
+            reduction_distance=reduction_distance,
+            metric=slr_metric
+
+        )
+
         if not success:
             self.pruned_streamlines = None
             self.transf_streamlines = None
@@ -197,7 +202,7 @@ class RecoBundles(object):
                   % (time()-t,))
         return self.pruned_streamlines
 
-    def cluster_model_bundle(self, model_clust_thr, nb_pts=20):
+    def cluster_model_bundle(self, model_clust_thr, nb_pts=20, metric=None):
         self.model_clust_thr = model_clust_thr
         t = time()
         if self.verbose:
@@ -209,15 +214,37 @@ class RecoBundles(object):
 
         self.model_cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts,
                                                 select_randomly=50000, verbose=self.verbose)
-        self.model_centroids = self.model_cluster_map.centroids
-        self.nb_model_centroids = len(self.model_centroids)
+
+        # TODO overflow with the next line
+        if metric == 'centroids':
+            close_clusters_indices_tuple = []
+            cluster_sizes = self.model_cluster_map.clusters_sizes()
+            for i in range(len(self.model_cluster_map.centroids)):
+                close_clusters_indices_tuple.append((i, cluster_sizes[i]))
+            sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
+
+            valid_centroids = []
+            #Only keep the cluster first 600 clusters that are big enough
+            for j in range(len(sorted_tuple)):
+                if j < 400 and sorted_tuple[-(j+1)][1] > 10:
+                    valid_centroids.append(sorted_tuple[-(j+1)][0])
+
+            self.model_centroids = [self.model_cluster_map.centroids[i]
+                                    for i in valid_centroids]
+            self.nb_model_centroids = len(self.model_centroids)
+            self.model_clusters_sizes = [cluster_sizes[i]
+                                        for i in valid_centroids]
+        else:
+            self.model_centroids = self.model_cluster_map.centroids
+            self.nb_model_centroids = len(self.model_centroids)
+            self.model_clusters_sizes = self.model_cluster_map.clusters_sizes()
 
         if self.verbose:
             print(' Model bundle has %d centroids'
                   % (self.nb_model_centroids,))
             print(' Duration %0.3f sec. \n' % (time() - t, ))
 
-    def reduce_search_space(self, reduction_thr=20, reduction_distance='mdf'):
+    def reduce_search_space(self, reduction_thr=20, reduction_distance='mdf', metric=None):
         t = time()
         if self.verbose:
             print('# Reduce search space')
@@ -241,37 +268,56 @@ class RecoBundles(object):
 
         mins = np.min(centroid_matrix, axis=0)
         close_clusters_indices = list(np.where(mins != np.inf)[0])
-
         # set_trace()
-        close_clusters_indices_tuple = []
-        # TODO overflow with the next line
-        close_clusters = self.cluster_map[close_clusters_indices]
-        for i in close_clusters_indices:
-            close_clusters_indices_tuple.append((i, self.cluster_map.clusters_sizes()[i]))
-        sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
+        if metric == 'centroids':
+            close_clusters_indices_tuple = []
+            # TODO overflow with the next line
+            close_clusters = self.cluster_map[close_clusters_indices]
+            for i in close_clusters_indices:
+                close_clusters_indices_tuple.append((i, self.cluster_map.clusters_sizes()[i]))
+            sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
 
-        close_clusters_indices = []
-        #Only keep the cluster first 600 clusters that are big enough
-        for j in range(len(sorted_tuple)):
-            if j < 600 and sorted_tuple[-(j+1)][1] > 10:
-                close_clusters_indices.append(sorted_tuple[-(j+1)][0])
+            close_clusters_indices = []
+            #Only keep the cluster first 600 clusters that are big enough
+            for j in range(len(sorted_tuple)):
+                if j < 600 and sorted_tuple[-(j+1)][1] > 10:
+                    close_clusters_indices.append(sorted_tuple[-(j+1)][0])
 
-        close_centroids = [self.centroids[i]
-                           for i in close_clusters_indices]
+            close_clusters=self.cluster_map[close_clusters_indices]
+            close_centroids = [self.centroids[i]
+                               for i in close_clusters_indices]
 
-        close_indices = [cluster.indices for cluster in close_clusters]
+            close_indices = [cluster.indices for cluster in close_clusters]
 
-        close_streamlines = ArraySequence(chain(*close_clusters))
-        self.centroid_matrix = centroid_matrix.copy()
+            close_streamlines = ArraySequence(chain(*close_clusters))
+            self.centroid_matrix = centroid_matrix.copy()
 
-        self.neighb_streamlines = close_streamlines
-        self.neighb_clusters = close_clusters
+            self.neighb_streamlines = close_streamlines
+            self.neighb_clusters = close_clusters
 
-        self.neighb_clusters_size = np.array([len(c) for c in self.neighb_clusters], dtype=np.int16)
-        self.neighb_centroids = close_centroids
-        self.neighb_indices = close_indices
+            self.neighb_clusters_size = np.array([len(c) for c in self.neighb_clusters], dtype=np.int16)
+            self.neighb_centroids = close_centroids
+            self.neighb_indices = close_indices
 
-        self.nb_neighb_streamlines = len(self.neighb_streamlines)
+            self.nb_neighb_streamlines = len(self.neighb_streamlines)
+        else:
+            close_clusters=self.cluster_map[close_clusters_indices]
+            close_centroids = [self.centroids[i]
+                               for i in close_clusters_indices]
+
+            close_indices = [cluster.indices for cluster in close_clusters]
+
+            close_streamlines = ArraySequence(chain(*close_clusters))
+            self.centroid_matrix = centroid_matrix.copy()
+
+            self.neighb_streamlines = close_streamlines
+            self.neighb_clusters = close_clusters
+
+            self.neighb_clusters_size = np.array([len(c) for c in self.neighb_clusters], dtype=np.int16)
+            self.neighb_centroids = close_centroids
+            self.neighb_indices = close_indices
+
+            self.nb_neighb_streamlines = len(self.neighb_streamlines)
 
         if self.nb_neighb_streamlines == 0:
             print(' You have no neighbor streamlines... No bundle recognition')
@@ -295,7 +341,6 @@ class RecoBundles(object):
             print('# Local SLR of neighb_streamlines to model')
 
         t = time()
-
         if metric is None or metric == 'symmetric':
             metric = BundleMinDistanceMetric()
         if metric == 'asymmetric':
@@ -305,7 +350,7 @@ class RecoBundles(object):
         if metric == 'centroids':
             metric = BundleCentroidsMinDistanceMetric()
             moving = (self.neighb_centroids, np.asarray(self.neighb_clusters_size, dtype=np.int32))
-            static = (self.model_centroids, np.asarray(self.model_cluster_map.clusters_sizes(), dtype=np.int32))
+            static = (self.model_centroids, np.asarray(self.model_clusters_sizes, dtype=np.int32))
         else:
             static = select_random_set_of_streamlines(self.model_bundle,
                                                       select_model)
@@ -322,7 +367,6 @@ class RecoBundles(object):
                       (-45, 45), (-45, 45), (-45, 45), (0.8, 1.2)]
 
         if progressive == False:
-
             slr = StreamlineLinearRegistration(metric=metric, x0=x0,
                                                bounds=bounds,
                                                method=method)
