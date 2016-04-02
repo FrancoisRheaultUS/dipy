@@ -132,7 +132,7 @@ class RecoBundles(object):
             print(' Size is %0.3f MB' % (nbytes(self.streamlines),))
             print(' Distance threshold %0.3f' % (clust_thr,))
 
-        thresholds = [40, 25, 20, clust_thr]
+        thresholds = [40, 30, 20, clust_thr]
 
         merged_cluster_map = qbx_with_merge(self.streamlines, thresholds,
                                             nb_pts, 500000, self.verbose)
