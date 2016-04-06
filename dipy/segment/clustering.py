@@ -750,8 +750,6 @@ class QuickBundlesX(Clustering):
         #cluster_map.refdata = streamlines
         return qbx
 
-<<<<<<< HEAD
-
 class QuickBundlesXOnline(Clustering):
     r""" Clusters streamlines using QuickBundlesX.
 
@@ -835,7 +833,7 @@ class QuickBundlesXOnline(Clustering):
         self._qbx_state, path = self._cluster_fct(streamline, self._idx)
         self._dirty = True
         return path
-=======
+
 def qbx_with_merge(streamlines, thresholds,  nb_pts=20):
 
     sample_streamlines = set_number_of_points(streamlines, nb_pts)
@@ -870,4 +868,3 @@ def qbx_with_merge(streamlines, thresholds,  nb_pts=20):
     merged_cluster_map.refdata = streamlines
 
     return merged_cluster_map
->>>>>>> First experimentation with centroids weigthed by their size, new distance metric

@@ -215,7 +215,6 @@ class RecoBundles(object):
         self.model_cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts,
                                                 select_randomly=50000, verbose=self.verbose)
 
-        # TODO overflow with the next line
         if metric == 'centroids':
             close_clusters_indices_tuple = []
             cluster_sizes = self.model_cluster_map.clusters_sizes()
@@ -224,7 +223,7 @@ class RecoBundles(object):
             sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
 
             valid_centroids = []
-            #Only keep the cluster first 600 clusters that are big enough
+            #Only keep the cluster first 400 clusters that are big enough
             for j in range(len(sorted_tuple)):
                 if j < 400 and sorted_tuple[-(j+1)][1] > 10:
                     valid_centroids.append(sorted_tuple[-(j+1)][0])
@@ -268,11 +267,9 @@ class RecoBundles(object):
 
         mins = np.min(centroid_matrix, axis=0)
         close_clusters_indices = list(np.where(mins != np.inf)[0])
-        # set_trace()
+
         if metric == 'centroids':
             close_clusters_indices_tuple = []
-            # TODO overflow with the next line
-            close_clusters = self.cluster_map[close_clusters_indices]
             for i in close_clusters_indices:
                 close_clusters_indices_tuple.append((i, self.cluster_map.clusters_sizes()[i]))
             sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
@@ -287,37 +284,19 @@ class RecoBundles(object):
             close_centroids = [self.centroids[i]
                                for i in close_clusters_indices]
 
-            close_indices = [cluster.indices for cluster in close_clusters]
+        close_indices = [cluster.indices for cluster in close_clusters]
 
-            close_streamlines = ArraySequence(chain(*close_clusters))
-            self.centroid_matrix = centroid_matrix.copy()
+        close_streamlines = ArraySequence(chain(*close_clusters))
+        self.centroid_matrix = centroid_matrix.copy()
 
-            self.neighb_streamlines = close_streamlines
-            self.neighb_clusters = close_clusters
+        self.neighb_streamlines = close_streamlines
+        self.neighb_clusters = close_clusters
 
-            self.neighb_clusters_size = np.array([len(c) for c in self.neighb_clusters], dtype=np.int16)
-            self.neighb_centroids = close_centroids
-            self.neighb_indices = close_indices
+        self.neighb_clusters_size = np.array([len(c) for c in self.neighb_clusters], dtype=np.int16)
+        self.neighb_centroids = close_centroids
+        self.neighb_indices = close_indices
 
-            self.nb_neighb_streamlines = len(self.neighb_streamlines)
-        else:
-            close_clusters=self.cluster_map[close_clusters_indices]
-            close_centroids = [self.centroids[i]
-                               for i in close_clusters_indices]
-
-            close_indices = [cluster.indices for cluster in close_clusters]
-
-            close_streamlines = ArraySequence(chain(*close_clusters))
-            self.centroid_matrix = centroid_matrix.copy()
-
-            self.neighb_streamlines = close_streamlines
-            self.neighb_clusters = close_clusters
-
-            self.neighb_clusters_size = np.array([len(c) for c in self.neighb_clusters], dtype=np.int16)
-            self.neighb_centroids = close_centroids
-            self.neighb_indices = close_indices
-
-            self.nb_neighb_streamlines = len(self.neighb_streamlines)
+        self.nb_neighb_streamlines = len(self.neighb_streamlines)
 
         if self.nb_neighb_streamlines == 0:
             print(' You have no neighbor streamlines... No bundle recognition')
