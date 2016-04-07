@@ -280,8 +280,8 @@ class RecoBundles(object):
                 if j < 600 and sorted_tuple[-(j+1)][1] > 10:
                     close_clusters_indices.append(sorted_tuple[-(j+1)][0])
 
-            close_clusters=self.cluster_map[close_clusters_indices]
-            close_centroids = [self.centroids[i]
+        close_clusters=self.cluster_map[close_clusters_indices]
+        close_centroids = [self.centroids[i]
                                for i in close_clusters_indices]
 
         close_indices = [cluster.indices for cluster in close_clusters]
