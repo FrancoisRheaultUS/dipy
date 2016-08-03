@@ -2,7 +2,7 @@ import numpy as np
 from dipy.tracking.streamline import (transform_streamlines,
                                       set_number_of_points, length,
                                       select_random_set_of_streamlines)
-from dipy.segment.clustering import (QuickBundlesX,
+from dipy.segment.clustering import (qbx_with_merge,
                                      ClusterMapCentroid, ClusterCentroid,
                                      AveragePointwiseEuclideanMetric)
 from dipy.tracking.distances import (bundles_distances_mdf,
@@ -30,67 +30,6 @@ def check_range(streamline, gt, lt):
 
 def nbytes(streamlines):
     return streamlines._data.nbytes / 1024. ** 2
-
-
-def qbx_with_merge(streamlines, thresholds,
-                   nb_pts=20, select_randomly=None, verbose=True):
-
-    t = time()
-    len_s = len(streamlines)
-    if select_randomly is None:
-        select_randomly = len_s
-    indices = np.random.choice(len_s, min(select_randomly, len_s),
-                               replace=False)
-    sample_streamlines = set_number_of_points(streamlines, nb_pts)
-
-    if verbose:
-        print(' Resampled to {} points'.format(nb_pts))
-        print(' Size is %0.3f MB' % (nbytes(sample_streamlines),))
-        print(' Duration of resampling is %0.3f sec.' % (time() - t,))
-
-    if verbose:
-        print(' QBX phase starting...')
-
-    qbx = QuickBundlesX(thresholds,
-                        metric=AveragePointwiseEuclideanMetric())
-
-    t1 = time()
-    qbx_clusters = qbx.cluster(sample_streamlines, ordering=indices)
-
-    if verbose:
-        print(' Merging phase starting ...')
-
-    qbx_merge = QuickBundlesX([thresholds[-1]],
-                              metric=AveragePointwiseEuclideanMetric())
-
-    final_level = len(thresholds)
-
-    qbx_ordering_final = np.random.choice(
-        len(qbx_clusters.get_clusters(final_level)),
-        len(qbx_clusters.get_clusters(final_level)), replace=False)
-
-    qbx_merged_cluster_map = qbx_merge.cluster(
-        qbx_clusters.get_clusters(final_level).centroids,
-        ordering=qbx_ordering_final).get_clusters(1)
-
-    qbx_cluster_map = qbx_clusters.get_clusters(final_level)
-
-    merged_cluster_map = ClusterMapCentroid()
-    for cluster in qbx_merged_cluster_map:
-        merged_cluster = ClusterCentroid(centroid=cluster.centroid)
-        for i in cluster.indices:
-            merged_cluster.indices.extend(qbx_cluster_map[i].indices)
-        merged_cluster_map.add_cluster(merged_cluster)
-
-    merged_cluster_map.refdata = streamlines
-
-    if verbose:
-        print(' QuickBundlesX time for %d random streamlines'
-              % (select_randomly,))
-
-        print(' Duration %0.3f sec. \n' % (time() - t1, ))
-
-    return merged_cluster_map
 
 
 class RecoBundles(object):
@@ -167,7 +106,7 @@ class RecoBundles(object):
             print('## Recognize given bundle ## \n')
 
         self.model_bundle = model_bundle
-        self.cluster_model_bundle(model_clust_thr=model_clust_thr, metric=slr_metric)
+        self.cluster_model_bundle(model_clust_thr=model_clust_thr, metric=slr_metric, min_cluster_size=5)
 
         success = self.reduce_search_space(
             reduction_thr=reduction_thr,
@@ -202,7 +141,7 @@ class RecoBundles(object):
                   % (time()-t,))
         return self.pruned_streamlines
 
-    def cluster_model_bundle(self, model_clust_thr, nb_pts=20, metric=None):
+    def cluster_model_bundle(self, model_clust_thr, nb_pts=20, metric=None, min_cluster_size=10):
         self.model_clust_thr = model_clust_thr
         t = time()
         if self.verbose:
@@ -210,29 +149,32 @@ class RecoBundles(object):
             print(' Model bundle has %d streamlines'
                   % (len(self.model_bundle), ))
             print(' Distance threshold %0.3f' % (model_clust_thr,))
-        thresholds = [40, 25, 20, model_clust_thr]
+        thresholds = [20, 15, 10, model_clust_thr]
 
         self.model_cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts,
-                                                select_randomly=50000, verbose=self.verbose)
+                                                select_randomly=None, verbose=self.verbose)
 
         if metric == 'centroids':
-            close_clusters_indices_tuple = []
-            cluster_sizes = self.model_cluster_map.clusters_sizes()
-            for i in range(len(self.model_cluster_map.centroids)):
-                close_clusters_indices_tuple.append((i, cluster_sizes[i]))
-            sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
-
-            valid_centroids = []
-            #Only keep the cluster first 400 clusters that are big enough
-            for j in range(len(sorted_tuple)):
-                if j < 400 and sorted_tuple[-(j+1)][1] > 10:
-                    valid_centroids.append(sorted_tuple[-(j+1)][0])
-
-            self.model_centroids = [self.model_cluster_map.centroids[i]
-                                    for i in valid_centroids]
-            self.nb_model_centroids = len(self.model_centroids)
-            self.model_clusters_sizes = [cluster_sizes[i]
-                                        for i in valid_centroids]
+            self.model_centroids = set_number_of_points(self.model_bundle, nb_pts)
+            self.nb_model_centroids = len(self.model_bundle)
+            self.model_clusters_sizes = [1 for i in range(len(self.model_bundle))]
+            #close_clusters_indices_tuple = []
+            #cluster_sizes = self.model_cluster_map.clusters_sizes()
+            #for i in range(len(self.model_cluster_map.centroids)):
+            #    close_clusters_indices_tuple.append((i, cluster_sizes[i]))
+            #sorted_tuple = sorted(close_clusters_indices_tuple, key=lambda size: size[1])
+#
+            #valid_centroids = []
+            ##Only keep the cluster first 400 clusters that are big enough
+            #for j in range(len(sorted_tuple)):
+            #    if j < 400 and sorted_tuple[-(j+1)][1] > min_cluster_size:
+            #        valid_centroids.append(sorted_tuple[-(j+1)][0])
+#
+            #self.model_centroids = [self.model_cluster_map.centroids[i]
+            #                        for i in valid_centroids]
+            #self.nb_model_centroids = len(self.model_centroids)
+            #self.model_clusters_sizes = [cluster_sizes[i]
+            #                            for i in valid_centroids]
         else:
             self.model_centroids = self.model_cluster_map.centroids
             self.nb_model_centroids = len(self.model_centroids)
@@ -468,7 +410,7 @@ class RecoBundles(object):
 
         thresholds = [40, 30, 20, 10, mdf_thr]
         self.rtransf_cluster_map = qbx_with_merge(self.transf_streamlines, thresholds, nb_pts=20,
-                                                  select_randomly=500000, verbose=self.verbose)
+                                                  select_randomly=None, verbose=self.verbose)
 
         if self.verbose:
             print(' QB Duration %0.3f sec. \n' % (time() - t, ))
