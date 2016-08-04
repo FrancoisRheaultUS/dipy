@@ -73,8 +73,7 @@ class RecoBundles(object):
 
         thresholds = [40, 30, 20, clust_thr]
 
-        merged_cluster_map = qbx_with_merge(self.streamlines, thresholds,
-                                            nb_pts, 500000, self.verbose)
+        merged_cluster_map = qbx_with_merge(self.streamlines, thresholds)
 
         self.cluster_map = merged_cluster_map
         self.centroids = merged_cluster_map.centroids
@@ -151,8 +150,7 @@ class RecoBundles(object):
             print(' Distance threshold %0.3f' % (model_clust_thr,))
         thresholds = [20, 15, 10, model_clust_thr]
 
-        self.model_cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts,
-                                                select_randomly=None, verbose=self.verbose)
+        self.model_cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts)
 
         if metric == 'centroids':
             self.model_centroids = set_number_of_points(self.model_bundle, nb_pts)
@@ -409,8 +407,7 @@ class RecoBundles(object):
         t = time()
 
         thresholds = [40, 30, 20, 10, mdf_thr]
-        self.rtransf_cluster_map = qbx_with_merge(self.transf_streamlines, thresholds, nb_pts=20,
-                                                  select_randomly=None, verbose=self.verbose)
+        self.rtransf_cluster_map = qbx_with_merge(self.transf_streamlines, thresholds, nb_pts=20)
 
         if self.verbose:
             print(' QB Duration %0.3f sec. \n' % (time() - t, ))
@@ -482,8 +479,7 @@ class KDTreeBundles(object):
     def build_kdtree(self, nb_pts=20, mdf_thr=10, mam_metric='mdf',
                      leaf_size=10):
         thresholds = [40, 30, 20, 10, mdf_thr]
-        cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts,
-                                     select_randomly=500000, verbose=self.verbose)
+        cluster_map = qbx_with_merge(self.model_bundle, thresholds, nb_pts=nb_pts)
 
         print('Number of centroids %d' % (len(cluster_map.centroids),))
 
