@@ -847,7 +847,7 @@ def qbx_with_merge(streamlines, thresholds,  nb_pts=20):
                               metric=AveragePointwiseEuclideanMetric())
 
     final_level = len(thresholds)
-    np.random.seed(0)
+    #np.random.seed(0)
     qbx_ordering_final = np.random.choice(
         len(qbx_clusters.get_clusters(final_level)),
         len(qbx_clusters.get_clusters(final_level)), replace=False)

@@ -163,10 +163,13 @@ def point(points, colors, opacity=1, point_radius=0.1, theta=8, phi=8):
 
     pts = vtk.vtkPoints()
     cnt_colors = 0
-
+    polys = vtk.vtkCellArray()
     for p in points:
 
-        pts.InsertNextPoint(p[0], p[1], p[2])
+        id = pts.InsertNextPoint(p[0], p[1], p[2])
+        polys.InsertNextCell(1)
+        polys.InsertCellPoint(id)
+
         scalars.InsertNextTuple3(
             round(255 * colors[cnt_colors][0]), round(255 * colors[cnt_colors][1]), round(255 * colors[cnt_colors][2]))
         cnt_colors += 1
@@ -178,6 +181,7 @@ def point(points, colors, opacity=1, point_radius=0.1, theta=8, phi=8):
 
     polyData = vtk.vtkPolyData()
     polyData.SetPoints(pts)
+    polyData.SetPolys(polys)
     polyData.GetPointData().SetScalars(scalars)
 
     glyph = vtk.vtkGlyph3D()
@@ -193,7 +197,7 @@ def point(points, colors, opacity=1, point_radius=0.1, theta=8, phi=8):
     if major_version <= 5:
         mapper.SetInput(glyph.GetOutput())
     else:
-        mapper.SetInputData(glyph.GetOutput())
+        mapper.SetInputConnection(glyph.GetOutputPort())
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
     actor.GetProperty().SetOpacity(opacity)
