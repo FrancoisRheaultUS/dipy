@@ -12,7 +12,7 @@ from dipy.tracking.streamline import (transform_streamlines,
                                       set_number_of_points,
                                       select_random_set_of_streamlines,
                                       length)
-from dipy.segment.clustering import QuickBundles
+from dipy.segment.clustering import QuickBundles, qbx_with_merge
 from dipy.core.geometry import (compose_transformations,
                                 compose_matrix,
                                 decompose_matrix)
@@ -953,10 +953,9 @@ def whole_brain_slr(static, moving,
     else:
         rstreamlines1 = streamlines1
 
-    rstreamlines1 = set_number_of_points(rstreamlines1, nb_pts)
-    qb1 = QuickBundles(threshold=qb_thr)
-    rstreamlines1 = [s.astype('f4') for s in rstreamlines1]
-    cluster_map1 = qb1.cluster(rstreamlines1)
+    thresholds = [40, 30, 20, qb_thr]
+
+    cluster_map1 = qbx_with_merge(rstreamlines1, thresholds, nb_pts=nb_pts)
     clusters1 = remove_clusters_by_size(cluster_map1, rm_small_clusters)
     qb_centroids1 = [cluster.centroid for cluster in clusters1]
 
@@ -966,10 +965,7 @@ def whole_brain_slr(static, moving,
     else:
         rstreamlines2 = streamlines2
 
-    rstreamlines2 = set_number_of_points(rstreamlines2, nb_pts)
-    qb2 = QuickBundles(threshold=qb_thr)
-    rstreamlines2 = [s.astype('f4') for s in rstreamlines2]
-    cluster_map2 = qb2.cluster(rstreamlines2)
+    cluster_map2 = qbx_with_merge(rstreamlines2, thresholds, nb_pts=nb_pts)
     clusters2 = remove_clusters_by_size(cluster_map2, rm_small_clusters)
     qb_centroids2 = [cluster.centroid for cluster in clusters2]
 
@@ -986,7 +982,7 @@ def whole_brain_slr(static, moving,
                   (-10, 10), (-10, 10), (-10, 10)]
         slm = progressive_slr(qb_centroids1, qb_centroids2,
                               x0=x0, metric=None,
-                              bounds=bounds)
+                              bounds=bounds,verbose=verbose)
 
     if verbose:
         print('QB static centroids size %d' % len(qb_centroids1,))
