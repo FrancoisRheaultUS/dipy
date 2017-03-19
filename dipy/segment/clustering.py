@@ -6,6 +6,7 @@ from abc import ABCMeta, abstractmethod
 from dipy.segment.metric import Metric
 from dipy.segment.metric import ResampleFeature
 from dipy.segment.metric import AveragePointwiseEuclideanMetric
+from dipy.tracking.streamline import set_number_of_points
 
 
 class Identity:
