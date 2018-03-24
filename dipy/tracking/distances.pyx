@@ -538,6 +538,76 @@ def bundles_distances_mam(tracksA, tracksB, metric='avg'):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
+def bundles_distances_mdf_max_thr(tracksA, tracksB, max_thr):
+    ''' Calculate distances between list of tracks A and list of tracks B
+
+    All tracks need to have the same number of points
+
+    Parameters
+    ----------
+    tracksA : sequence
+       of tracks as arrays, [(N,3) .. (N,3)]
+    tracksB : sequence
+       of tracks as arrays, [(N,3) .. (N,3)]
+
+    Returns
+    -------
+    DM : array, shape (len(tracksA), len(tracksB))
+        distances between tracksA and tracksB according to metric
+
+    See Also
+    ---------
+    dipy.metrics.downsample
+
+    '''
+    cdef:
+        size_t i, j, lentA, lentB
+    # preprocess tracks
+    cdef:
+        size_t longest_track_len = 0, track_len
+        longest_track_lenA, longest_track_lenB
+        cnp.ndarray[object, ndim=1] tracksA32
+        cnp.ndarray[object, ndim=1] tracksB32
+        cnp.ndarray[cnp.double_t, ndim=2] DM
+    lentA = len(tracksA)
+    lentB = len(tracksB)
+    tracksA32 = np.zeros((lentA,), dtype=object)
+    tracksB32 = np.zeros((lentB,), dtype=object)
+    DM = np.zeros((lentA,lentB), dtype=np.double)
+    # process tracks to predictable memory layout
+    for i in range(lentA):
+        tracksA32[i] = np.ascontiguousarray(tracksA[i], dtype=f32_dt)
+    for i in range(lentB):
+        tracksB32[i] = np.ascontiguousarray(tracksB[i], dtype=f32_dt)
+    # preallocate buffer array for track distance calculations
+    cdef:
+        cnp.float32_t *t1_ptr, *t2_ptr, *min_buffer
+    # cycle over tracks
+    cdef:
+        cnp.ndarray [cnp.float32_t, ndim=2] t1, t2
+        size_t t1_len, t2_len
+        float d[2]
+    t_len = tracksA32[0].shape[0]
+
+    for i from 0 <= i < lentA:
+        t1 = tracksA32[i]
+        #t1_len = t1.shape[0]
+        t1_ptr = <cnp.float32_t *>t1.data
+        for j from 0 <= j < lentB:
+            t2 = tracksB32[j]
+            #t2_len = t2.shape[0]
+            t2_ptr = <cnp.float32_t *>t2.data
+            #DM[i,j] = czhang(t1_len, t1_ptr, t2_len, t2_ptr, min_buffer, metric_type)
+            track_direct_flip_dist_max_thr(t1_ptr, t2_ptr,t_len, max_thr,<float *>d)
+            if d[0]<d[1]:
+                DM[i,j]=d[0]
+            else:
+                DM[i,j]=d[1]
+    return DM
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
 def bundles_distances_mdf(tracksA, tracksB):
     ''' Calculate distances between list of tracks A and list of tracks B
 
@@ -604,8 +674,6 @@ def bundles_distances_mdf(tracksA, tracksB):
             else:
                 DM[i,j]=d[1]
     return DM
-
-
 
 
 cdef cnp.float32_t inf = np.inf
@@ -1420,6 +1488,73 @@ cdef void track_direct_flip_dist(float *a,float *b,long rows,float *out) nogil:
     out[1]=distf/<float>rows
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef void track_direct_flip_dist_max_thr(float *a,float *b,long rows, max_thr, float *out):
+    r''' Direct and flip average distance between two tracks
+
+    Parameters
+    ----------
+    a : first track
+    b : second track
+    rows : number of points of the track
+        both tracks need to have the same number of points
+
+    Returns
+    -------
+    out : direct and flipped average distance added
+
+    Notes
+    -----
+    The distance calculated between two tracks::
+
+        t_1       t_2
+
+        0*   a    *0
+          \       |
+           \      |
+           1*     |
+            |  b  *1
+            |      \
+            2*      \
+                c    *2
+
+    is equal to $(a+b+c)/3$ where $a$ the euclidean distance between t_1[0] and
+    t_2[0], $b$ between t_1[1] and t_2[1] and $c$ between t_1[2] and t_2[2].
+    Also the same with t2 flipped (so t_1[0] compared to t_2[2] etc).
+
+    See also
+    --------
+    dipy.tracking.distances.local_skeleton_clustering
+    '''
+    cdef:
+        long i=0,j=0
+        float sub=0,subf=0,distf=0,dist=0,tmprow=0, tmprowf=0
+
+    for i from 0<=i<rows:
+        tmprow=0
+        tmprowf=0
+        for j from 0<=j<3:
+            sub=a[i*3+j]-b[i*3+j]
+            subf=a[i*3+j]-b[(rows-1-i)*3+j]
+            tmprow+=sub*sub
+            tmprowf+=subf*subf
+
+        if sqrt(tmprow)<max_thr:
+            dist+=sqrt(tmprow)
+        else:
+            dist+=10000.0
+
+        if sqrt(tmprowf)<max_thr:
+            distf+=sqrt(tmprowf)
+        else:
+            distf+=10000.0
+
+    out[0]=dist/<float>rows
+    out[1]=distf/<float>rows
+
+
 @cython.cdivision(True)
 cdef inline void track_direct_flip_3dist(float *a1, float *b1,float  *c1,float *a2, float *b2, float *c2, float *out) nogil:
     ''' Calculate the euclidean distance between two 3pt tracks
@@ -1461,9 +1596,6 @@ ctypedef struct LSC_Cluster:
     long *indices
     float *hidden
     long N
-
-
-
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
